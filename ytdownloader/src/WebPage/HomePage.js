@@ -14,15 +14,15 @@ import { Box,Input,Center,InputRightElement,Button,InputGroup,Flex,Table,useToas
     DrawerOverlay,
     DrawerContent,
     DrawerCloseButton,
-    
+    Link,
     useDisclosure,
     Progress} from "@chakra-ui/react";
   import axios from 'axios';
   import fileDownload from 'js-file-download';
   import { createFFmpeg, fetchFile } from '@ffmpeg/ffmpeg';
   // maxresdefault.webp
-  import BasicUsage from './Modal'
-  const baseURL="http://localhost:8000/"
+  // const baseURL="http://localhost:8000/"
+  const baseURL="http://192.168.0.104:8000/"
 
   
 // https://stackoverflow.com/questions/28735459/how-to-validate-youtube-url-in-client-side-in-text-box
@@ -40,6 +40,15 @@ if(str!=undefined || str !=''){
         }
 
 }
+}
+
+function getRandomString(length) {
+  var randomChars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  var result = '';
+  for ( var i = 0; i < length; i++ ) {
+      result += randomChars.charAt(Math.floor(Math.random() * randomChars.length));
+  }
+  return result;
 }
 
 // https://stackoverflow.com/questions/15900485/correct-way-to-convert-size-in-bytes-to-kb-mb-gb-in-javascript
@@ -67,6 +76,10 @@ function formatBytes(bytes, decimals = 2) {
     const [loading,setLoading]=useState(false);
     const [done,setDone]=useState(null)
     const [ratio,setRatio]=useState(null)
+    const [downloadURL,setDownloadURL]=useState({
+      showButton:false,
+      downloadURL:null
+    })
 
     const ffmpeg = createFFmpeg({
       log: true,
@@ -81,30 +94,68 @@ function formatBytes(bytes, decimals = 2) {
     const toast = useToast()
     const { isOpen, onOpen, onClose } = useDisclosure()
     const btnRef = React.useRef()
+
+
+
     const CombineAndDownload=async (AudioURL,videoURL,videoName)=>{
       // try to catch exceptions
       const AudioName="AUD_"+videoName;
       console.log(AudioName)
-      const outputFileName=`${videoName}.mp4`
+      let outputFileName=`${title}.mp4`.replace(/[^\x20-\x7E]/gu, "").replace(/ +/, " ")
       if(!ffmpeg.isLoaded()){
         await ffmpeg.load();
       }
      
       console.log('Start transcoding')
-      ffmpeg.FS('writeFile', videoName, await fetchFile(videoURL));
-      ffmpeg.FS('writeFile',AudioName,await fetchFile(AudioURL));
-      console.log("yo")
-      await ffmpeg.run('-i', videoName,'-i' ,AudioName,'-y','-acodec','copy','-vcodec', 'copy',outputFileName);
-      // ffmpeg -i audioFile.au -i videoFile.mp4 -y -acodec copy -vcodec copy mergedFile.mp4  
-      console.log('Complete transcoding')
-      const data = ffmpeg.FS('readFile', outputFileName);
-       const blobUrl  = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+     
+      try{
+        ffmpeg.FS('writeFile', videoName, await fetchFile(videoURL));
+        ffmpeg.FS('writeFile',AudioName,await fetchFile(AudioURL));
+        await ffmpeg.run('-i', videoName,'-i' ,AudioName,'-y','-acodec','copy','-vcodec', 'copy',outputFileName);
+        // ffmpeg -i audioFile.au -i videoFile.mp4 -y -acodec copy -vcodec copy mergedFile.mp4  
+        console.log('Complete transcoding')
+        var data = ffmpeg.FS('readFile', outputFileName);
+        const blobUrl  = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
         const anchor = document.createElement('a');
-      anchor.href = blobUrl;
-      anchor.target = "_blank";
-      anchor.download = outputFileName;
-      anchor.click();
-      URL.revokeObjectURL(blobUrl);
+        anchor.href = blobUrl;
+        anchor.target = "_blank";
+        anchor.download = outputFileName;
+        anchor.click();
+        onClose()
+        URL.revokeObjectURL(blobUrl);
+        }
+      
+      catch(err){
+        let outputFileNameR=String(getRandomString(10))
+        let videoName_catch="CATCH"+outputFileName+".webm"
+        let AudioName_catch="AUD_"+videoName_catch
+        let outputFileName_catch=outputFileNameR+".mp4"
+        
+        ffmpeg.FS('writeFile', videoName_catch, await fetchFile(videoURL));
+        ffmpeg.FS('writeFile',AudioName_catch,await fetchFile(AudioURL));
+        await ffmpeg.run('-i', videoName_catch,'-i' ,AudioName_catch,'-y','-acodec','copy','-vcodec', 'copy',outputFileName_catch);
+        // ffmpeg -i audioFile.au -i videoFile.mp4 -y -acodec copy -vcodec copy mergedFile.mp4  
+        console.log('Complete transcoding')
+        var data = ffmpeg.FS('readFile', outputFileName_catch);
+        const blobUrl  = URL.createObjectURL(new Blob([data.buffer], { type: 'video/mp4' }));
+        const anchor = document.createElement('a');
+        anchor.href = blobUrl;
+        anchor.target = "_blank";
+        anchor.download = outputFileName_catch;
+        anchor.click();
+        onClose()
+        URL.revokeObjectURL(blobUrl);
+
+      }
+      toast({
+        title: "Downloading",
+        description: "The download has already started",
+        status: "info",
+        duration: 3000,
+        isClosable: true,
+      })
+      
+     
     }
 
   const handleChange=(e)=>{
@@ -137,10 +188,14 @@ function formatBytes(bytes, decimals = 2) {
       if(!res.data.combine){
         console.log(res.data.DownloadURL)
         // fileDownload(res.data.DownloadURL, `${title}.mp4`);
+       setDownloadURL({
+         showButton:true,
+         downloadURL:res.data.DownloadURL})
 
 
       }
       else if(res.data.combine){
+        
         console.log(res.data)
         const retCombineData=res.data;
         const vidName=retCombineData.videoName
@@ -151,6 +206,21 @@ function formatBytes(bytes, decimals = 2) {
     })
     .catch(err=>{
       console.log(err)
+      onClose()
+      if(err.response.status==500){
+        toast({
+          title: "Something went wrong",
+          description: "This error occured because  server couldnt download file",
+          status: "error",
+          duration: 3000,
+          isClosable: true,
+        })
+      }
+      
+      setDownloadURL({
+        showButton:false,
+        downloadURL:null})
+
     })
     // make a post request to server asking to download the file
   }
@@ -250,17 +320,29 @@ function formatBytes(bytes, decimals = 2) {
           <DrawerHeader>Downloading Video from Server</DrawerHeader>
           <DrawerBody>
 
-         {done=="direct"?(<><Progress colorScheme="twitter" hasStripe isAnimated={true} value={100} />
-            <Center style={{flex:1,flexDirection:"column"}}>
-            <Text style={{fontWeight:"bold" }} fontSize="md" >This will take some time Depending on File Size </Text>
+         {done=="direct"?(<>
+         {downloadURL.showButton?(
+           <Button variant="solid" colorScheme="whatsapp" >
+           <Link href={downloadURL.downloadURL} download>
+            Download
+         </Link>
+         </Button>
+          
+)
+            :(<><Progress colorScheme="twitter" hasStripe isAnimated={true} value={100} />
+            <Text style={{fontWeight:"bold" }} fontSize="md" >This will take some time Depending on File Size </Text></>)}
+          
+            
                
          
-            </Center></>):null} 
+            </>):null} 
 
             {done=="processed"?(<>
             {ratio===null?
                 (<Progress colorScheme="twitter" hasStripe isAnimated={true} value={100} />):
-                (<Progress colorScheme="whatsapp" hasStripe isAnimated={true} value={ratio} />)}
+                (ratio!=100?(<Progress colorScheme="whatsapp" hasStripe isAnimated={true} value={ratio} />):(
+                  <Text style={{fontWeight:"bold" }} fontSize="md" >File is already Downloading</Text>
+                ))}
             <Center style={{flex:1,flexDirection:"column"}}>
             <Text style={{fontWeight:"bold" }} fontSize="md" >File Size is smaller because processing is done in your browser</Text>
             </Center></>):null} 
